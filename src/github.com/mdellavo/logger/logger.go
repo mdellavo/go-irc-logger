@@ -1,21 +1,21 @@
 package main
 
 import (
+	"bufio"
 	"log"
 	"net"
 	"os"
-	"bufio"
 	"strings"
 )
 
-func write (conn net.Conn, s string) {
+func write(conn net.Conn, s string) {
 	s = strings.Replace(s, "\t", "        ", -1)
 	conn.Write([]byte(s))
 }
 
 func main() {
 
-	conn, err := net.Dial("udp", "localhost:5222")
+	conn, err := net.Dial("udp", "quuux.org:5222")
 	defer conn.Close()
 	if err != nil {
 		log.Fatal(err)

@@ -3,14 +3,14 @@ package main
 import (
 	"log"
 	"net"
-	"strings"
 	"net/textproto"
+	"strings"
 )
 
 const IRC_HOST = "literat.us:6667"
 const IRC_NICK = "gobot"
 
-func loggerMain() (chan []string) {
+func loggerMain() chan []string {
 
 	out := make(chan []string, 1000)
 
@@ -19,12 +19,12 @@ func loggerMain() (chan []string) {
 
 		addr, err := net.ResolveUDPAddr("udp", ":5222")
 		if err != nil {
-			log.Fatal(err);
+			log.Fatal(err)
 		}
 
 		conn, err := net.ListenUDP("udp", addr)
 		if err != nil {
-			log.Fatal(err);
+			log.Fatal(err)
 		}
 
 		for {
@@ -38,11 +38,11 @@ func loggerMain() (chan []string) {
 			payload := string(buf[:n])
 			log.Printf("payload of %d bytes from %s: %s", n, remote, payload)
 
-			out <- []string {strings.SplitN(remote.String(), ":", 2)[0], payload}
+			out <- []string{strings.SplitN(remote.String(), ":", 2)[0], payload}
 		}
 
 		log.Print("logger finished.")
-	} (out)
+	}(out)
 
 	return out
 }
@@ -59,14 +59,14 @@ type IrcConn struct {
 	Conn *textproto.Conn
 }
 
-func ircMain(host, nick, channel string) (IrcConn) {
+func ircMain(host, nick, channel string) IrcConn {
 
 	ircConn := IrcConn{host, nick, channel, make(chan string, 1000), make(chan []string, 1000), nil}
 
 	writer := func(ircConn IrcConn) {
 		log.Print("writer starting...")
 		for {
-			msg := <- ircConn.Outgoing
+			msg := <-ircConn.Outgoing
 			log.Printf("outgoing >>> %s", msg)
 
 			fmt := msg[0]
@@ -126,9 +126,9 @@ func (ircConn *IrcConn) Cmd(msg ...string) {
 	ircConn.Outgoing <- msg
 }
 
-var IRC_COMMANDS = map[string]func(IrcConn, []string) {
+var IRC_COMMANDS = map[string]func(IrcConn, []string){
 	"PING": func(conn IrcConn, params []string) {
-		conn.Cmd("PONG %s", params[1])
+		conn.Cmd("PONG %s", params[0])
 	},
 	"MODE": func(conn IrcConn, params []string) {
 		conn.Cmd("JOIN %s", conn.Channel)
@@ -184,9 +184,9 @@ func main() {
 	for {
 		select {
 
-		case line := <- ircConn.Incoming:
+		case line := <-ircConn.Incoming:
 
- 			// fixme - move off to another pipeline stage
+			// fixme - move off to another pipeline stage
 			prefix, cmd, args := parseLine(line)
 			log.Printf("incoming <<< (prefix=%s, cmd=%s, args=%s)", prefix, cmd, args)
 
@@ -197,7 +197,7 @@ func main() {
 
 			break
 
-		case line := <- loggerChan:
+		case line := <-loggerChan:
 			log.Printf("logger >>> %s", line)
 			ircConn.Cmd("PRIVMSG %s :[%s] %s", ircConn.Channel, line[0], line[1])
 			break
