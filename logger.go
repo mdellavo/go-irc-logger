@@ -8,6 +8,11 @@ import (
 	"strings"
 )
 
+func write (conn net.Conn, s string) {
+	s = strings.Replace(s, "\t", "        ", -1)
+	conn.Write([]byte(s))
+}
+
 func main() {
 
 	conn, err := net.Dial("udp", "localhost:5222")
@@ -16,13 +21,13 @@ func main() {
 		log.Fatal(err)
 	}
 
-	if len(os.Args) == 1 {
+	if len(os.Args) > 1 && os.Args[1] == "-" {
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
-			conn.Write([]byte(scanner.Text()))
+			write(conn, scanner.Text())
 		}
 	} else {
-		conn.Write([]byte(strings.Join(os.Args[1:], " ")))
+		write(conn, strings.Join(os.Args[1:], " "))
 	}
 
 }
