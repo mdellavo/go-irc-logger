@@ -38,7 +38,17 @@ func loggerMain() chan []string {
 			payload := string(buf[:n])
 			log.Printf("payload of %d bytes from %s: %s", n, remote, payload)
 
-			out <- []string{strings.SplitN(remote.String(), ":", 2)[0], payload}
+			ip := strings.SplitN(remote.String(), ":", 2)[0]
+			names, err := net.LookupAddr(ip)
+
+			var tag string
+			if err != nil {
+				tag = ip
+			} else {
+				tag = names[0]
+			}
+
+			out <- []string{tag, payload}
 		}
 
 		log.Print("logger finished.")

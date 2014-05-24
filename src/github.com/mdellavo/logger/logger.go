@@ -14,12 +14,13 @@ func write(conn net.Conn, s string) {
 	conn.Write([]byte(s))
 }
 
-var host = flag.String("h", "localhost", "host to log to")
+var host = flag.String("h", "localhost", "target log host")
+var port = flag.String("p", "5222", "log port")
 
 func main() {
 	flag.Parse()
 
-	conn, err := net.Dial("udp", *host + ":5222")
+	conn, err := net.Dial("udp", *host + ":" + *port)
 	defer conn.Close()
 	if err != nil {
 		log.Fatal(err)
