@@ -3,21 +3,53 @@ package main
 import (
 	"log"
 	"net"
+	"flag"
+	"time"
+	"strconv"
 	"net/textproto"
 	"strings"
 )
 
-const IRC_HOST = "literat.us:6667"
-const IRC_NICK = "gobot"
+var Port = flag.String("p", "5222", "listen port")
+var Host = flag.String("h", "", "irc host")
+var Nick = flag.String("n", "", "irc nick")
+var Channel = flag.String("c", "", "irc channel")
 
-func loggerMain() chan []string {
+func now() (int) {
+	return int(time.Now().Unix())
+}
+
+func getRemote(remote net.Addr) (ip, name string) {
+
+	ip = strings.SplitN(remote.String(), ":", 2)[0]
+	names, err := net.LookupAddr(ip)
+
+	if err != nil {
+		return ip, ""
+	}
+
+	return ip, names[0]
+
+}
+
+func getRemoteTag(remote net.Addr) (tag string) {
+	ip, name := getRemote(remote)
+
+	if name != "" {
+		return name
+	}
+
+	return ip
+}
+
+func udpLoggerMain() chan []string {
 
 	out := make(chan []string, 1000)
 
-	go func(out chan []string) {
+	reader := func(out chan []string) {
 		log.Print("Starting logger...")
 
-		addr, err := net.ResolveUDPAddr("udp", ":5222")
+		addr, err := net.ResolveUDPAddr("udp", ":" + *Port)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -35,24 +67,61 @@ func loggerMain() chan []string {
 				return
 			}
 
-			payload := string(buf[:n])
-			log.Printf("payload of %d bytes from %s: %s", n, remote, payload)
+			go func() {
 
-			ip := strings.SplitN(remote.String(), ":", 2)[0]
-			names, err := net.LookupAddr(ip)
+				payload := string(buf[:n])
+				log.Printf("payload of %d bytes from %s: %s", n, remote, payload)
 
-			var tag string
-			if err != nil {
-				tag = ip
-			} else {
-				tag = names[0]
-			}
+				out <- []string{getRemoteTag(remote), payload}
 
-			out <- []string{tag, payload}
+			}()
 		}
 
 		log.Print("logger finished.")
-	}(out)
+	}
+
+	go reader(out)
+
+	return out
+}
+
+func tcpLoggerMain() chan []string {
+	out := make(chan []string, 1000)
+
+	reader := func(c net.Conn) {
+		defer c.Close()
+		stream := textproto.NewConn(c)
+		tag := getRemoteTag(c.RemoteAddr())
+		for {
+
+			line, err := stream.ReadLine()
+
+			if err != nil {
+				log.Print("closing reader")
+				break
+			}
+
+
+			out <- []string{tag, line}
+		}
+	}
+
+	listener := func(out chan []string) {
+		l, err := net.Listen("tcp", ":" + *Port)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer l.Close()
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				log.Fatal(err)
+			}
+			go reader(conn)
+		}
+	}
+
+	go listener(out)
 
 	return out
 }
@@ -96,7 +165,7 @@ func ircMain(host, nick, channel string) IrcConn {
 		log.Print("writer complete")
 	}
 
-	go func(ircConn IrcConn) {
+	reader := func(ircConn IrcConn) {
 		log.Print("Starting irc...")
 
 		log.Printf("connecting to %s...", host)
@@ -127,7 +196,9 @@ func ircMain(host, nick, channel string) IrcConn {
 		}
 
 		log.Print("irc finished.")
-	}(ircConn)
+	}
+
+	go reader(ircConn)
 
 	return ircConn
 }
@@ -147,6 +218,8 @@ var IRC_COMMANDS = map[string]func(IrcConn, []string){
 
 		if params[1] == "hello" || params[1] == "hi" {
 			conn.Cmd("PRIVMSG %s :%s", params[0], params[1])
+		} else if params[1] == "ping" {
+			conn.Cmd("PRIVMSG %s CTCP PING %s %s", *Channel, strconv.Itoa(now()), "1")
 		}
 
 	},
@@ -156,9 +229,6 @@ var IRC_COMMANDS = map[string]func(IrcConn, []string){
 }
 
 func parseLine(s string) (string, string, []string) {
-
-	log.Printf("parsing -> %s", s)
-
 	prefix := ""
 	trailing := ""
 	args := []string{}
@@ -188,16 +258,23 @@ func parseLine(s string) (string, string, []string) {
 
 func main() {
 
-	loggerChan := loggerMain()
-	ircConn := ircMain(IRC_HOST, IRC_NICK, "#gobot")
+	flag.Parse()
+
+	udpLoggerChan := udpLoggerMain()
+	tcpLoggerChan := tcpLoggerMain()
+	ircConn := ircMain(*Host, *Nick, *Channel)
+
+	echo := func(msg []string) {
+		ircConn.Cmd("PRIVMSG %s :[%s] %s", ircConn.Channel, msg[0], msg[1])
+	}
 
 	for {
 		select {
 
-		case line := <-ircConn.Incoming:
+		case msg := <-ircConn.Incoming:
 
-			// fixme - move off to another pipeline stage
-			prefix, cmd, args := parseLine(line)
+			// FIXME - move off to another pipeline stage
+			prefix, cmd, args := parseLine(msg)
 			log.Printf("incoming <<< (prefix=%s, cmd=%s, args=%s)", prefix, cmd, args)
 
 			f, ok := IRC_COMMANDS[cmd]
@@ -207,9 +284,14 @@ func main() {
 
 			break
 
-		case line := <-loggerChan:
-			log.Printf("logger >>> %s", line)
-			ircConn.Cmd("PRIVMSG %s :[%s] %s", ircConn.Channel, line[0], line[1])
+		case msg := <- tcpLoggerChan:
+			log.Printf("tcp logger >>> %s", msg)
+			echo(msg)
+			break
+
+		case msg := <- udpLoggerChan:
+			log.Printf("udp logger >>> %s", msg)
+			echo(msg)
 			break
 		}
 	}
